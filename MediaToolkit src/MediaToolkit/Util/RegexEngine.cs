@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using MediaToolkit.Model;
@@ -20,7 +20,7 @@ namespace MediaToolkit.Util
             {Find.Duration, new Regex(@"Duration: ([^,]*), ")},
             {Find.ConvertProgressFrame, new Regex(@"frame=\s*([0-9]*)")},
             {Find.ConvertProgressFps, new Regex(@"fps=\s*([0-9]*\.?[0-9]*?)")},
-            {Find.ConvertProgressSize, new Regex(@" size=\s*([0-9]*)kB")},
+            {Find.ConvertProgressSize, new Regex(@"size=\s*([0-9]*)kB")},
             {Find.ConvertProgressFinished, new Regex(@"Lsize=\s*([0-9]*)kB")},
             {Find.ConvertProgressTime, new Regex(@"time=\s*([^ ]*)")},
             {Find.ConvertProgressBitrate, new Regex(@"bitrate=\s*([0-9]*\.?[0-9]*?)kbits/s")},
@@ -53,21 +53,58 @@ namespace MediaToolkit.Util
             Match matchTime = Index[Find.ConvertProgressTime].Match(data);
             Match matchBitrate = Index[Find.ConvertProgressBitrate].Match(data);
 
-            if (!matchFrame.Success || !matchFps.Success || !matchSize.Success || !matchTime.Success ||
-                !matchBitrate.Success) return false;
+            if (!matchSize.Success || !matchTime.Success || !matchBitrate.Success)
+                return false;
 
             TimeSpan processedDuration;
             TimeSpan.TryParse(matchTime.Groups[1].Value, out processedDuration);
 
-            long frame = Convert.ToInt64(matchFrame.Groups[1].Value);
-            double fps = Convert.ToDouble(matchFps.Groups[1].Value);
-            int sizeKb = Convert.ToInt32(matchSize.Groups[1].Value);
-            double bitrate = Convert.ToDouble(matchBitrate.Groups[1].Value);
+            long? frame = GetLongValue(matchFrame);
+            double? fps = GetDoubleValue(matchFps);
+            int? sizeKb = GetIntValue(matchSize);
+            double? bitrate = GetDoubleValue(matchBitrate);
 
             progressEventArgs = new ConvertProgressEventArgs(processedDuration, TimeSpan.Zero, frame, fps, sizeKb, bitrate);
 
             return true;
         }
+
+        private static long? GetLongValue(Match match)
+        {
+            try
+            {
+                return Convert.ToInt64(match.Groups[1].Value, CultureInfo.InvariantCulture);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static double? GetDoubleValue(Match match)
+        {
+            try
+            {
+                return Convert.ToDouble(match.Groups[1].Value, CultureInfo.InvariantCulture);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static int? GetIntValue(Match match)
+        {
+            try
+            {
+                return Convert.ToInt32(match.Groups[1].Value, CultureInfo.InvariantCulture);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
 
         /// <summary>
         ///     <para> ---- </para>
@@ -94,17 +131,17 @@ namespace MediaToolkit.Util
             TimeSpan processedDuration;
             TimeSpan.TryParse(matchTime.Groups[1].Value, out processedDuration);
 
-            long frame = Convert.ToInt64(matchFrame.Groups[1].Value);
-            double fps = Convert.ToDouble(matchFps.Groups[1].Value);
-            int sizeKb = Convert.ToInt32(matchFinished.Groups[1].Value);
-            double bitrate = Convert.ToDouble(matchBitrate.Groups[1].Value);
+            long frame = Convert.ToInt64(matchFrame.Groups[1].Value, CultureInfo.InvariantCulture);
+            double fps = Convert.ToDouble(matchFps.Groups[1].Value, CultureInfo.InvariantCulture);
+            int sizeKb = Convert.ToInt32(matchFinished.Groups[1].Value, CultureInfo.InvariantCulture);
+            double bitrate = Convert.ToDouble(matchBitrate.Groups[1].Value, CultureInfo.InvariantCulture);
 
             conversionCompleteEvent = new ConversionCompleteEventArgs(processedDuration, TimeSpan.Zero, frame, fps, sizeKb, bitrate);
 
             return true;
         }
 
-        internal static void TestVideo(string data, Engine.EngineParameters engine)
+        internal static void TestVideo(string data, EngineParameters engine)
         {
             Match matchMetaVideo = Index[Find.MetaVideo].Match(data);
 
@@ -125,7 +162,7 @@ namespace MediaToolkit.Util
                     Format = matchVideoFormatColorSize[1].ToString(),
                     ColorModel = matchVideoFormatColorSize[2].ToString(),
                     FrameSize = matchVideoFormatColorSize[3].ToString(),
-                    Fps = Convert.ToDouble(matchVideoFps[1].ToString(), new CultureInfo("en-US")),
+                    Fps = matchVideoFps[1].Success && !string.IsNullOrEmpty(matchVideoFps[1].ToString()) ? Convert.ToDouble(matchVideoFps[1].ToString(), new CultureInfo("en-US")) : 0,
                     BitRateKbs =
                         matchVideoBitRate.Success
                             ? (int?) Convert.ToInt32(matchVideoBitRate.Groups[1].ToString())
@@ -133,7 +170,7 @@ namespace MediaToolkit.Util
                 };
         }
 
-        internal static void TestAudio(string data, Engine.EngineParameters engine)
+        internal static void TestAudio(string data, EngineParameters engine)
         {
             Match matchMetaAudio = Index[Find.MetaAudio].Match(data);
 
@@ -153,7 +190,7 @@ namespace MediaToolkit.Util
                     Format = matchAudioFormatHzChannel[1].ToString(),
                     SampleRate = matchAudioFormatHzChannel[2].ToString(),
                     ChannelOutput = matchAudioFormatHzChannel[3].ToString(),
-                    BitRateKbs = Convert.ToInt32(matchAudioBitRate[1].ToString())
+                    BitRateKbs = !(matchAudioBitRate[1].ToString().IsNullOrWhiteSpace()) ? Convert.ToInt32(matchAudioBitRate[1].ToString()) : 0
                 };
         }
 

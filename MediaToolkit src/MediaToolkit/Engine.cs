@@ -1,262 +1,306 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
-using System.IO.Compression;
-using System.Reflection;
-using System.Text.RegularExpressions;
-using System.Threading;
-using MediaToolkit.Model;
-using MediaToolkit.Options;
-using MediaToolkit.Util;
-
-namespace MediaToolkit
+﻿namespace MediaToolkit
 {
-    public sealed class Engine : IDisposable
+    using System;
+    using System.Collections.Generic;
+    using System.Diagnostics;
+    using System.IO;
+    using System.Text.RegularExpressions;
+
+    using MediaToolkit.Model;
+    using MediaToolkit.Options;
+    using MediaToolkit.Properties;
+    using MediaToolkit.Util;
+
+    /// -------------------------------------------------------------------------------------------------
+    /// <summary>   An engine. This class cannot be inherited. </summary>
+    public class Engine : EngineBase
     {
         /// <summary>
-        ///     Used for locking the FFmpeg process to one thread.
+        ///     Event queue for all listeners interested in conversionComplete events.
         /// </summary>
-        private static readonly object Lock = new object();
-        private static readonly string FFmpegFilePath = Path.GetTempPath() + "/MediaToolkit/ffmpeg.exe";
-        private Process _ffmpegProcess;
-
-        public void Dispose()
-        {
-            _ffmpegProcess = null;
-        }
-
         public event EventHandler<ConversionCompleteEventArgs> ConversionCompleteEvent;
-        public event EventHandler<ConvertProgressEventArgs> ConvertProgressEvent;
 
-        private void OnProgressChanged(ConvertProgressEventArgs e)
-        {
-            EventHandler<ConvertProgressEventArgs> handler = ConvertProgressEvent;
-            if (handler != null) handler(this, e);
-        }
-
-        private void OnConversionComplete(ConversionCompleteEventArgs e)
-        {
-            EventHandler<ConversionCompleteEventArgs> handler = ConversionCompleteEvent;
-            if (handler != null) handler(this, e);
-        }
-
-
-        /// <summary>
-        ///     <para> --- </para>
-        ///     <para> Initializes FFmpeg.exe; Ensuring that there is a copy</para>
-        ///     <para> in the clients temp folder & isn't in use by another process.</para>
-        /// </summary>
         public Engine()
         {
-            string ffmpegDirectory = "" + Path.GetDirectoryName(FFmpegFilePath);
-
-            if (!Directory.Exists(ffmpegDirectory)) Directory.CreateDirectory(ffmpegDirectory);
-
-            if (File.Exists(FFmpegFilePath))
-            {
-                if (!Document.IsFileLocked(new FileInfo(FFmpegFilePath))) return;
-
-                Process[] ffmpegProcesses = Process.GetProcessesByName("ffmpeg");
-                if (ffmpegProcesses.Length > 0)
-                    foreach (Process process in ffmpegProcesses)
-                    {
-                        // pew pew pew...
-                        process.Kill();
-                        // let it die...
-                        Thread.Sleep(200);
-                    }
-            }
-            else
-            {
-                Stream ffmpegStream = Assembly.GetExecutingAssembly()
-                    .GetManifestResourceStream("MediaToolkit.Resources.FFmpeg.exe.gz");
-
-                if (ffmpegStream == null) throw new Exception("FFMpeg GZip stream is null");
-
-                using (var tempFileStream = new FileStream(FFmpegFilePath, FileMode.Create))
-                using (var gZipStream = new GZipStream(ffmpegStream, CompressionMode.Decompress))
-                {
-                    gZipStream.CopyTo(tempFileStream);
-                }
-            }
+            
         }
 
-        /// <summary>
-        ///     Retrieve a thumbnail image from a video file.
-        /// </summary>
-        /// <param name="inputFile">Video file</param>
-        /// <param name="outputFile">Image file</param>
-        /// <param name="options">Conversion options</param>
-        public void GetThumbnail(MediaFile inputFile, MediaFile outputFile, ConversionOptions options)
+        public Engine(string ffMpegPath) : base(ffMpegPath)
         {
-            var engineParams = new EngineParameters
-            {
-                InputFile = inputFile,
-                OutputFile = outputFile,
-                ConversionOptions = options,
-                Task = FFmpegTask.GetThumbnail
-            };
-
-            FFmpegEngine(engineParams);
+            
         }
 
-        /// <summary>
-        ///     <para> ---</para>
-        ///     <para> Retrieve media metadata</para>
-        /// </summary>
-        /// <param name="inputFile">Retrieves the metadata for the input file</param>
-        public void GetMetadata(MediaFile inputFile)
-        {
-            var engineParams = new EngineParameters
-            {
-                InputFile = inputFile,
-                Task = FFmpegTask.GetMetaData
-            };
-
-            FFmpegEngine(engineParams);
-        }
-
+        /// -------------------------------------------------------------------------------------------------
         /// <summary>
         ///     <para> ---</para>
         ///     <para> Converts media with conversion options</para>
         /// </summary>
-        /// <param name="inputFile">Input file</param>
-        /// <param name="outputFile">Output file</param>
-        /// <param name="options">Conversion options</param>
+        /// <param name="inputFile">    Input file. </param>
+        /// <param name="outputFile">   Output file. </param>
+        /// <param name="options">      Conversion options. </param>
         public void Convert(MediaFile inputFile, MediaFile outputFile, ConversionOptions options)
         {
-            var engineParams = new EngineParameters
-            {
-                InputFile = inputFile,
-                OutputFile = outputFile,
-                ConversionOptions = options,
-                Task = FFmpegTask.Convert
-            };
+            EngineParameters engineParams = new EngineParameters
+                {
+                    InputFile = inputFile,
+                    OutputFile = outputFile,
+                    ConversionOptions = options,
+                    Task = FFmpegTask.Convert
+                };
 
-            FFmpegEngine(engineParams);
+            this.FFmpegEngine(engineParams);
         }
 
+        /// -------------------------------------------------------------------------------------------------
         /// <summary>
         ///     <para> ---</para>
         ///     <para> Converts media with default options</para>
         /// </summary>
+        /// <param name="inputFile">    Input file. </param>
+        /// <param name="outputFile">   Output file. </param>
         public void Convert(MediaFile inputFile, MediaFile outputFile)
         {
-            var engineParams = new EngineParameters
-            {
-                InputFile = inputFile,
-                OutputFile = outputFile,
-                Task = FFmpegTask.Convert
-            };
+            EngineParameters engineParams = new EngineParameters
+                {
+                    InputFile = inputFile,
+                    OutputFile = outputFile,
+                    Task = FFmpegTask.Convert
+                };
 
-            FFmpegEngine(engineParams);
+            this.FFmpegEngine(engineParams);
         }
 
+        /// <summary>   Event queue for all listeners interested in convertProgress events. </summary>
+        public event EventHandler<ConvertProgressEventArgs> ConvertProgressEvent;
+
+        public void CustomCommand(string ffmpegCommand)
+        {
+            if (ffmpegCommand.IsNullOrWhiteSpace())
+            {
+                throw new ArgumentNullException("ffmpegCommand");
+            }
+
+            EngineParameters engineParameters = new EngineParameters { CustomArguments = ffmpegCommand };
+
+            this.StartFFmpegProcess(engineParameters);
+        }
+
+        /// -------------------------------------------------------------------------------------------------
         /// <summary>
-        ///     Where the magic happens
+        ///     <para> Retrieve media metadata</para>
         /// </summary>
-        /// <param name="engineParameters">The engine parameters</param>
+        /// <param name="inputFile">    Retrieves the metadata for the input file. </param>
+        public void GetMetadata(MediaFile inputFile)
+        {
+            EngineParameters engineParams = new EngineParameters
+                {
+                    InputFile = inputFile,
+                    Task = FFmpegTask.GetMetaData
+                };
+
+            this.FFmpegEngine(engineParams);
+        }
+
+        /// -------------------------------------------------------------------------------------------------
+        /// <summary>   Retrieve a thumbnail image from a video file. </summary>
+        /// <param name="inputFile">    Video file. </param>
+        /// <param name="outputFile">   Image file. </param>
+        /// <param name="options">      Conversion options. </param>
+        public void GetThumbnail(MediaFile inputFile, MediaFile outputFile, ConversionOptions options)
+        {
+            EngineParameters engineParams = new EngineParameters
+                {
+                    InputFile = inputFile,
+                    OutputFile = outputFile,
+                    ConversionOptions = options,
+                    Task = FFmpegTask.GetThumbnail
+                };
+
+            this.FFmpegEngine(engineParams);
+        }
+        
+        #region Private method - Helpers
+
         private void FFmpegEngine(EngineParameters engineParameters)
         {
-            if (!File.Exists(engineParameters.InputFile.Filename))
-                throw new FileNotFoundException("Input file not found", engineParameters.InputFile.Filename);
-
-            // Locking the process to ensure FFmpeg is used by one thread at a time.
-            lock (Lock)
+            if (!engineParameters.InputFile.Filename.StartsWith("http://") && !File.Exists(engineParameters.InputFile.Filename))
             {
-                //Initialize();
+                throw new FileNotFoundException(Resources.Exception_Media_Input_File_Not_Found, engineParameters.InputFile.Filename);
+            }
 
-                var receivedMessagesLog = new List<string>();
-                var totalMediaDuration = new TimeSpan();
+            try
+            {
+                this.Mutex.WaitOne();
+                this.StartFFmpegProcess(engineParameters);
+            }
+            finally
+            {
+                this.Mutex.ReleaseMutex();
+            }
+        }
 
-                ProcessStartInfo processStartInfo = GenerateStartInfo(engineParameters);
-                using (_ffmpegProcess = Process.Start(processStartInfo))
+        private ProcessStartInfo GenerateStartInfo(EngineParameters engineParameters)
+        {
+            string arguments = CommandBuilder.Serialize(engineParameters);
+
+            return this.GenerateStartInfo(arguments);
+        }
+
+        private ProcessStartInfo GenerateStartInfo(string arguments)
+        {
+            //windows case
+            if (Path.DirectorySeparatorChar == '\\')
+            {
+                return new ProcessStartInfo
                 {
-                    if (_ffmpegProcess == null) throw new InvalidOperationException("FFmpeg process is not running.");
+                    Arguments = "-nostdin -y -loglevel info " + arguments,
+                    FileName = this.FFmpegFilePath,
+                    CreateNoWindow = true,
+                    RedirectStandardInput = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                };
+            }
+            else //linux case: -nostdin options doesn't exist at least in debian ffmpeg
+            {
+                return new ProcessStartInfo
+                {
+                    Arguments = "-y -loglevel info " + arguments,
+                    FileName = this.FFmpegFilePath,
+                    CreateNoWindow = true,
+                    RedirectStandardInput = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                };
+            }
+        }
+        
+        #endregion
 
-                    _ffmpegProcess.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs received)
-                    {
-                        if (received.Data == null) return;
+        /// -------------------------------------------------------------------------------------------------
+        /// <summary>   Raises the conversion complete event. </summary>
+        /// <param name="e">    Event information to send to registered event handlers. </param>
+        private void OnConversionComplete(ConversionCompleteEventArgs e)
+        {
+            EventHandler<ConversionCompleteEventArgs> handler = this.ConversionCompleteEvent;
+            if (handler != null)
+            {
+                handler(this, e);
+            }
+        }
 
+        /// -------------------------------------------------------------------------------------------------
+        /// <summary>   Raises the convert progress event. </summary>
+        /// <param name="e">    Event information to send to registered event handlers. </param>
+        private void OnProgressChanged(ConvertProgressEventArgs e)
+        {
+            EventHandler<ConvertProgressEventArgs> handler = this.ConvertProgressEvent;
+            if (handler != null)
+            {
+                handler(this, e);
+            }
+        }
+
+        /// -------------------------------------------------------------------------------------------------
+        /// <summary>   Starts FFmpeg process. </summary>
+        /// <exception cref="InvalidOperationException">
+        ///     Thrown when the requested operation is
+        ///     invalid.
+        /// </exception>
+        /// <exception cref="Exception">
+        ///     Thrown when an exception error condition
+        ///     occurs.
+        /// </exception>
+        /// <param name="engineParameters"> The engine parameters. </param>
+        private void StartFFmpegProcess(EngineParameters engineParameters)
+        {
+            List<string> receivedMessagesLog = new List<string>();
+            TimeSpan totalMediaDuration = new TimeSpan();
+         
+            ProcessStartInfo processStartInfo = engineParameters.HasCustomArguments 
+                                              ? this.GenerateStartInfo(engineParameters.CustomArguments)
+                                              : this.GenerateStartInfo(engineParameters);
+
+            using (this.FFmpegProcess = Process.Start(processStartInfo))
+            {
+                Exception caughtException = null;
+                if (this.FFmpegProcess == null)
+                {
+                    throw new InvalidOperationException(Resources.Exceptions_FFmpeg_Process_Not_Running);
+                }
+
+                this.FFmpegProcess.ErrorDataReceived += (sender, received) =>
+                {
+                    if (received.Data == null) return;
 #if (DebugToConsole)
-                        Console.WriteLine(received.Data);
+                    Console.WriteLine(received.Data);
 #endif
+                    try
+                    {
+                        
                         receivedMessagesLog.Insert(0, received.Data);
-
-                        RegexEngine.TestVideo(received.Data, engineParameters);
-                        RegexEngine.TestAudio(received.Data, engineParameters);
-
-                        Match matchDuration = RegexEngine.Index[RegexEngine.Find.Duration].Match(received.Data);
-                        if (matchDuration.Success)
+                        if (engineParameters.InputFile != null)
                         {
-                            if (engineParameters.InputFile.Metadata == null)
-                                engineParameters.InputFile.Metadata = new Metadata();
+                            RegexEngine.TestVideo(received.Data, engineParameters);
+                            RegexEngine.TestAudio(received.Data, engineParameters);
+                        
+                            Match matchDuration = RegexEngine.Index[RegexEngine.Find.Duration].Match(received.Data);
+                            if (matchDuration.Success)
+                            {
+                                if (engineParameters.InputFile.Metadata == null)
+                                {
+                                    engineParameters.InputFile.Metadata = new Metadata();
+                                }
 
-                            TimeSpan.TryParse(matchDuration.Groups[1].Value, out totalMediaDuration);
-                            engineParameters.InputFile.Metadata.Duration = totalMediaDuration;
+                                TimeSpan.TryParse(matchDuration.Groups[1].Value, out totalMediaDuration);
+                                engineParameters.InputFile.Metadata.Duration = totalMediaDuration;
+                            }
                         }
-
                         ConversionCompleteEventArgs convertCompleteEvent;
                         ConvertProgressEventArgs progressEvent;
 
                         if (RegexEngine.IsProgressData(received.Data, out progressEvent))
                         {
                             progressEvent.TotalDuration = totalMediaDuration;
-                            OnProgressChanged(progressEvent);
+                            this.OnProgressChanged(progressEvent);
                         }
                         else if (RegexEngine.IsConvertCompleteData(received.Data, out convertCompleteEvent))
                         {
                             convertCompleteEvent.TotalDuration = totalMediaDuration;
-                            OnConversionComplete(convertCompleteEvent);
+                            this.OnConversionComplete(convertCompleteEvent);
                         }
-                    };
+                    }
+                    catch (Exception ex)
+                    {
+                        // catch the exception and kill the process since we're in a faulted state
+                        caughtException = ex;
 
-                    _ffmpegProcess.BeginErrorReadLine();
-                    _ffmpegProcess.WaitForExit();
+                        try
+                        {
+                            this.FFmpegProcess.Kill();
+                        }
+                        catch (InvalidOperationException)
+                        {
+                            // swallow exceptions that are thrown when killing the process, 
+                            // one possible candidate is the application ending naturally before we get a chance to kill it
+                        }
+                    }
+                };
 
-                    if (_ffmpegProcess.ExitCode != 0 && _ffmpegProcess.ExitCode != 1)
-                        throw new Exception(_ffmpegProcess.ExitCode + ": " + receivedMessagesLog[1] +
-                                            receivedMessagesLog[0]);
+                this.FFmpegProcess.BeginErrorReadLine();
+                this.FFmpegProcess.WaitForExit();
+
+                if ((this.FFmpegProcess.ExitCode != 0 && this.FFmpegProcess.ExitCode != 1) || caughtException != null)
+                {
+                    throw new Exception(
+                        this.FFmpegProcess.ExitCode + ": " + receivedMessagesLog[1] + receivedMessagesLog[0],
+                        caughtException);
                 }
             }
-        }
-
-
-        private ProcessStartInfo GenerateStartInfo(EngineParameters engineParameters)
-        {
-            string ffmpegCommand = CommandBuilder.Serialize(engineParameters);
-
-            return new ProcessStartInfo
-            {
-                Arguments = "-nostdin -y -loglevel info " + ffmpegCommand,
-                FileName = FFmpegFilePath,
-                CreateNoWindow = true,
-                RedirectStandardInput = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                WindowStyle = ProcessWindowStyle.Hidden,
-                WorkingDirectory = Path.GetTempPath()
-            };
-        }
-
-        /// <summary>
-        ///     Configures the engine to perform the correct task
-        /// </summary>
-        internal class EngineParameters
-        {
-            internal MediaFile InputFile { get; set; }
-            internal MediaFile OutputFile { get; set; }
-            internal ConversionOptions ConversionOptions { get; set; }
-            internal FFmpegTask Task { get; set; }
-        }
-
-        internal enum FFmpegTask
-        {
-            Convert,
-            GetMetaData,
-            GetThumbnail
         }
     }
 }

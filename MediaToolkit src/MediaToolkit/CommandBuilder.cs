@@ -1,27 +1,29 @@
-﻿using System;
-using System.Text;
-using MediaToolkit.Model;
+﻿using MediaToolkit.Model;
 using MediaToolkit.Options;
 using MediaToolkit.Util;
+using System;
+using System.Globalization;
+using System.Text;
 
 namespace MediaToolkit
 {
     internal class CommandBuilder
     {
-        internal static string Serialize(Engine.EngineParameters engineParameters)
+        internal static string Serialize(EngineParameters engineParameters)
         {
             switch (engineParameters.Task)
             {
-                case Engine.FFmpegTask.Convert:
+                case FFmpegTask.Convert:
                     return Convert(engineParameters.InputFile, engineParameters.OutputFile, engineParameters.ConversionOptions);
 
-                case Engine.FFmpegTask.GetMetaData:
+                case FFmpegTask.GetMetaData:
                     return GetMetadata(engineParameters.InputFile);
 
-                case Engine.FFmpegTask.GetThumbnail:
+                case FFmpegTask.GetThumbnail:
                     return GetThumbnail(engineParameters.InputFile, engineParameters.OutputFile, engineParameters.ConversionOptions);
+                default:
+                    throw new ArgumentOutOfRangeException();
             }
-            return null;
         }
 
         private static string GetMetadata(MediaFile inputFile)
@@ -32,12 +34,10 @@ namespace MediaToolkit
         private static string GetThumbnail(MediaFile inputFile, MediaFile outputFile, ConversionOptions conversionOptions)
         {
             var commandBuilder = new StringBuilder();
-            
-            commandBuilder.AppendFormat(" -ss {0} ",
-                conversionOptions.Seek.GetValueOrDefault(TimeSpan.FromSeconds(1)).TotalSeconds);
-            
+
+            commandBuilder.AppendFormat(CultureInfo.InvariantCulture, " -ss {0} ", conversionOptions.Seek.GetValueOrDefault(TimeSpan.FromSeconds(1)).TotalSeconds);
+
             commandBuilder.AppendFormat(" -i \"{0}\" ", inputFile.Filename);
-            commandBuilder.AppendFormat(" -t {0} ", 1);
             commandBuilder.AppendFormat(" -vframes {0} ", 1);
 
             return commandBuilder.AppendFormat(" \"{0}\" ", outputFile.Filename).ToString();
@@ -49,11 +49,11 @@ namespace MediaToolkit
 
             // Default conversion
             if (conversionOptions == null)
-                return commandBuilder.AppendFormat(" -i \"{0}\"  \"{1}\" ",inputFile.Filename, outputFile.Filename).ToString();
+                return commandBuilder.AppendFormat(" -i \"{0}\"  \"{1}\" ", inputFile.Filename, outputFile.Filename).ToString();
 
             // Media seek position
             if (conversionOptions.Seek != null)
-                commandBuilder.AppendFormat(" -ss {0} ", conversionOptions.Seek.Value.TotalSeconds);
+                commandBuilder.AppendFormat(CultureInfo.InvariantCulture, " -ss {0} ", conversionOptions.Seek.Value.TotalSeconds);
 
             commandBuilder.AppendFormat(" -i \"{0}\" ", inputFile.Filename);
 
@@ -63,8 +63,7 @@ namespace MediaToolkit
                 commandBuilder.Append(" -target ");
                 if (conversionOptions.TargetStandard != TargetStandard.Default)
                 {
-                    commandBuilder.AppendFormat(" {0}-{1} \"{2}\" ", conversionOptions.TargetStandard.ToLower(),
-                        conversionOptions.Target.ToLower(), outputFile.Filename);
+                    commandBuilder.AppendFormat(" {0}-{1} \"{2}\" ", conversionOptions.TargetStandard.ToLower(), conversionOptions.Target.ToLower(), outputFile.Filename);
 
                     return commandBuilder.ToString();
                 }
@@ -85,8 +84,16 @@ namespace MediaToolkit
             if (conversionOptions.VideoBitRate != null)
                 commandBuilder.AppendFormat(" -b {0}k ", conversionOptions.VideoBitRate);
 
+            // Video frame rate
+            if (conversionOptions.VideoFps != null)
+                commandBuilder.AppendFormat(" -r {0} ", conversionOptions.VideoFps);
+
             // Video size / resolution
-            if (conversionOptions.VideoSize != VideoSize.Default)
+            if (conversionOptions.VideoSize == VideoSize.Custom)
+            {
+                commandBuilder.AppendFormat(" -vf \"scale={0}:{1}\" ", conversionOptions.CustomWidth ?? -2, conversionOptions.CustomHeight ?? -2);
+            }
+            else if (conversionOptions.VideoSize != VideoSize.Default)
             {
                 string size = conversionOptions.VideoSize.ToLower();
                 if (size.StartsWith("_")) size = size.Replace("_", "");
@@ -103,6 +110,18 @@ namespace MediaToolkit
                 ratio = ratio.Replace("_", ":");
 
                 commandBuilder.AppendFormat(" -aspect {0} ", ratio);
+            }
+
+            // Video cropping
+            if (conversionOptions.SourceCrop != null)
+            {
+                var crop = conversionOptions.SourceCrop;
+                commandBuilder.AppendFormat(" -filter:v \"crop={0}:{1}:{2}:{3}\" ", crop.Width, crop.Height, crop.X, crop.Y);
+            }
+
+            if (conversionOptions.BaselineProfile)
+            {
+                commandBuilder.Append(" -profile:v baseline ");
             }
 
             return commandBuilder.AppendFormat(" \"{0}\" ", outputFile.Filename).ToString();
